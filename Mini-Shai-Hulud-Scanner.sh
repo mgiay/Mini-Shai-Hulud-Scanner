@@ -8,7 +8,7 @@
 set -o pipefail
 
 # --- Configuration -----------------------------------------------------------
-VERSION="1.0.0"
+VERSION="1.1.0"
 SCAN_ROOT=""
 REPORT_FILE=""
 VERBOSE=0
@@ -19,7 +19,11 @@ FOUND_THREATS=0
 
 # Known malicious SHA-256 hashes
 readonly KNOWN_HASHES=(
-    # Mini Shai-Hulud (Wave 3 - April 2026)
+    # Mini Shai-Hulud Wave 4 - TanStack (May 2026)
+    "ab4fcadaec49c03278063dd269ea5eef82d24f2124a8e15d7b90f2fa8601266c"  # router_init.js
+    "2ec78d556d696e208927cc503d48e4b5eb56b31abc2870c2ed2e98d6be27fc96"  # tanstack_runner.js
+    "7c12d8614c624c70d6dd6fc2ee289332474abaa38f70ebe2cdef064923ca3a9b"  # @tanstack/setup package.json
+    # Mini Shai-Hulud Wave 3 - SAP CAP (April 2026)
     "4066781fa830224c8bbcc3aa005a396657f9c8f9016f9a64ad44a9d7f5f45e34"  # setup.mjs
     "80a3d2877813968ef847ae73b5eeeb70b9435254e74d7f07d8cf4057f0a710ac"  # execution.js (mbt)
     "6f933d00b7d05678eb43c90963a80b8947c4ae6830182f89df31da9f568fea95"  # execution.js (@cap-js/sqlite)
@@ -53,7 +57,21 @@ readonly IOC_STRINGS=(
     "__DAEMONIZED"
     "tmp.987654321.lock"
     "dependabout/github_actions/format/setup-formatter"
+    "dependabot/github_actions/format/"
     "cloudmtabot"
+    # Wave 4 - TanStack specific
+    "svksjrhjkcejg"
+    "EveryBoiWeBuildIsAWormyBoi"
+    "IfYouRevokeThisTokenItWillWipeTheComputerOfTheOwner"
+    "79ac49eedf774dd4b0cfa308722bc463cfe5885c"
+    "voicproducoes"
+    "filev2.getsession.org"
+    "api.masscan.cloud"
+    "git-tanstack.com"
+    "litter.catbox.moe"
+    "router_init.js"
+    "tanstack_runner.js"
+    "gh-token-monitor"
 )
 
 # Malicious file names to detect
@@ -63,6 +81,9 @@ readonly MALICIOUS_FILES=(
     "setup_bun.js"
     "bun_environment.js"
     "bundle.js"
+    # Wave 4 - TanStack
+    "router_init.js"
+    "tanstack_runner.js"
 )
 
 # Persistence paths to check
@@ -72,6 +93,14 @@ readonly PERSISTENCE_PATHS=(
     ".github/workflows/format-check.yml"
     ".github/workflows/discussion.yaml"
     ".github/workflows/shai-hulud-workflow.yml"
+    # Wave 4 - TanStack persistence
+    ".github/workflows/codeql_analysis.yml"
+    ".claude/router_runtime.js"
+    ".claude/setup.mjs"
+    ".vscode/setup.mjs"
+    ".local/bin/gh-token-monitor.sh"
+    ".config/systemd/user/gh-token-monitor.service"
+    "Library/LaunchAgents/com.user.gh-token-monitor.plist"
 )
 
 # --- Terminal Colors ----------------------------------------------------------
@@ -141,7 +170,7 @@ log_report() {
 check_deps() {
     local missing=0
 
-    for cmd in sha256sum find grep jq stat du; do
+    for cmd in sha256sum find grep jq stat; do
         if ! command -v "$cmd" &>/dev/null; then
             error "Missing required tool: $cmd"
             missing=1
@@ -162,6 +191,11 @@ check_deps() {
 scan_hashes() {
     header "1. Malicious File Hash Scan"
 
+    # Build associative arrays for O(1) lookup
+    local -A HASH_MAP=()
+    for h in "${KNOWN_HASHES[@]}"; do HASH_MAP["$h"]="malware"; done
+    for h in "${KNOWN_TARBALLS[@]}"; do HASH_MAP["$h"]="tarball"; done
+
     local scanned=0
     local file_list
 
@@ -170,7 +204,6 @@ scan_hashes() {
         file_list=$(find "$SCAN_ROOT" -type f \( -name "*.js" -o -name "*.mjs" -o -name "*.cjs" -o -name "*.tgz" \) 2>/dev/null)
     else
         info "Scanning all files (this may take a while)..."
-        # Exclude /proc, /sys, /dev for full system scans
         file_list=$(find "$SCAN_ROOT" -type f -not -path "*/proc/*" -not -path "*/sys/*" -not -path "*/dev/*" 2>/dev/null)
     fi
 
@@ -182,21 +215,18 @@ scan_hashes() {
         hash=$(sha256sum "$file" 2>/dev/null | awk '{print $1}')
         [[ -z "$hash" ]] && continue
 
-        for known_hash in "${KNOWN_HASHES[@]}"; do
-            if [[ "$hash" == "$known_hash" ]]; then
-                local fsize
-                fsize=$(stat -c%s "$file" 2>/dev/null || stat -f%z "$file" 2>/dev/null || echo "?")
-                threat "KNOWN MALICIOUS HASH [$known_hash]: $file ($fsize bytes)"
-                log_report "HASH_MATCH|$known_hash|$file|$fsize"
+        local match_type="${HASH_MAP[$hash]:-}"
+        if [[ -n "$match_type" ]]; then
+            local fsize
+            fsize=$(stat -c%s "$file" 2>/dev/null || stat -f%z "$file" 2>/dev/null || echo "?")
+            if [[ "$match_type" == "tarball" ]]; then
+                threat "KNOWN MALICIOUS TARBALL [$hash]: $file"
+                log_report "TARBALL_MATCH|$hash|$file"
+            else
+                threat "KNOWN MALICIOUS HASH [$hash]: $file ($fsize bytes)"
+                log_report "HASH_MATCH|$hash|$file|$fsize"
             fi
-        done
-
-        for tarball_hash in "${KNOWN_TARBALLS[@]}"; do
-            if [[ "$hash" == "$tarball_hash" ]]; then
-                threat "KNOWN MALICIOUS TARBALL [$tarball_hash]: $file"
-                log_report "TARBALL_MATCH|$tarball_hash|$file"
-            fi
-        done
+        fi
     done <<< "$file_list"
 
     info "Scanned $scanned files for known hashes"
@@ -206,42 +236,46 @@ scan_hashes() {
 scan_ioc_strings() {
     header "2. IOC String Scan"
 
-    local search_root="$SCAN_ROOT"
-    # Limit to reasonable paths
-    local target_dirs=(
-        "$search_root"
-    )
+    [[ ! -d "$SCAN_ROOT" ]] && return
 
-    for dir in "${target_dirs[@]}"; do
-        [[ ! -d "$dir" ]] && continue
-
-        for ioc in "${IOC_STRINGS[@]}"; do
-            if [[ "$VERBOSE" -eq 1 ]]; then
-                info "Searching for: $ioc"
-            fi
-
-            local matches
-            matches=$(grep -rl --include="*.js" --include="*.mjs" --include="*.json" \
-                --include="*.ts" --include="*.yml" --include="*.yaml" --include="*.sh" \
-                --include="*.py" --include="*.txt" --include="*.md" \
-                "$ioc" "$dir" 2>/dev/null)
-
-            if [[ -n "$matches" ]]; then
-                while IFS= read -r match_file; do
-                    [[ -z "$match_file" ]] && continue
-                    # Skip scanning our own report
-                    [[ "$match_file" == "$REPORT_FILE" ]] && continue
-
-                    local line_num
-                    line_num=$(grep -nF "$ioc" "$match_file" 2>/dev/null | head -1 | cut -d: -f1)
-                    threat "IOC string '$ioc' found in: $match_file (line $line_num)"
-                    log_report "IOC_STRING|$ioc|$match_file|$line_num"
-                done <<< "$matches"
-            elif [[ "$VERBOSE" -eq 1 ]]; then
-                ok "String '$ioc' not found"
-            fi
-        done
+    # Build alternation pattern from all IOCs (escape regex special chars)
+    local pattern=""
+    for ioc in "${IOC_STRINGS[@]}"; do
+        local escaped; escaped=$(printf '%s' "$ioc" | sed 's/[.[\*^$()+?{|]/\\&/g')
+        [[ -n "$pattern" ]] && pattern="$pattern|"
+        pattern="$pattern$escaped"
     done
+
+    if [[ "$VERBOSE" -eq 1 ]]; then
+        info "Combined IOC pattern: ${pattern:0:120}..."
+    fi
+
+    # Single grep pass over all target file types
+    local matches
+    matches=$(grep -rlnE --include="*.js" --include="*.mjs" --include="*.json" \
+        --include="*.ts" --include="*.yml" --include="*.yaml" --include="*.sh" \
+        --include="*.py" --include="*.txt" --include="*.md" \
+        "$pattern" "$SCAN_ROOT" 2>/dev/null)
+
+    if [[ -n "$matches" ]]; then
+        while IFS= read -r match_file; do
+            [[ -z "$match_file" ]] && continue
+            [[ "$match_file" == "$REPORT_FILE" ]] && continue
+
+            # Find which specific IOC matched
+            local matched_lines
+            matched_lines=$(grep -nE "$pattern" "$match_file" 2>/dev/null | head -5)
+            while IFS= read -r mline; do
+                [[ -z "$mline" ]] && continue
+                local line_num="${mline%%:*}"
+                local line_content="${mline#*:}"
+                threat "IOC string found in: $match_file (line $line_num): ${line_content:0:120}"
+                log_report "IOC_STRING|$match_file|$line_num|${line_content:0:200}"
+            done <<< "$matched_lines"
+        done <<< "$matches"
+    elif [[ "$VERBOSE" -eq 1 ]]; then
+        ok "No IOC strings found"
+    fi
 }
 
 # --- Section 3: Malicious Filename Scan ---------------------------------------
@@ -292,7 +326,7 @@ scan_large_js() {
             if grep -qF "ctf-scramble-v2" "$lf" 2>/dev/null; then
                 threat "  -> FILE CONTAINS ctf-scramble-v2 CIPHER MARKER"
             fi
-            if grep -qF "ocean-sh/bun/releases" "$lf" 2>/dev/null; then
+            if grep -qF "oven-sh/bun/releases" "$lf" 2>/dev/null; then
                 threat "  -> FILE REFERENCES BUN DOWNLOAD URL"
             fi
         done <<< "$large_files"
@@ -301,7 +335,8 @@ scan_large_js() {
     fi
 }
 
-# --- Section 5: Preinstall Script Audit ---------------------------------------
+# --- Section 5: Preinstall/Prepare Script Audit ------------------------------------
+# (Also covers Wave 4 optionalDependencies + prepare hook attack vector)
 scan_preinstall() {
     header "5. Suspicious Preinstall Scripts in package.json"
 
@@ -331,9 +366,35 @@ scan_preinstall() {
             warn "Package [$pkg_name@$pkg_ver] has preinstall script: $has_preinstall"
             log_report "PREINSTALL_SCRIPT|$pkg_name|$pkg_ver|$has_preinstall|$pkg"
 
-            # Flag dangerous patterns
             if echo "$has_preinstall" | grep -qE "setup\.mjs|execution\.js|curl.*bun|wget.*bun"; then
                 threat "  -> DANGEROUS: preinstall references known malicious file or downloads Bun"
+            fi
+        fi
+
+        # Check for prepare scripts (Wave 4 TanStack vector)
+        local has_prepare
+        has_prepare=$(jq -r 'select(.scripts.prepare != null) | .scripts.prepare' "$pkg" 2>/dev/null)
+        if [[ -n "$has_prepare" && "$has_prepare" != "null" ]]; then
+            local pkg_name; pkg_name=$(jq -r '.name // "unknown"' "$pkg" 2>/dev/null)
+            local pkg_ver; pkg_ver=$(jq -r '.version // "unknown"' "$pkg" 2>/dev/null)
+
+            if echo "$has_prepare" | grep -qE "bun.*run.*tanstack_runner|bun.*run.*router_init|tanstack_runner\.js"; then
+                threat "Wave 4 TanStack prepare hook: [$pkg_name@$pkg_ver] $has_prepare"
+                log_report "WAVE4_PREPARE_HOOK|$pkg_name|$pkg_ver|$has_prepare|$pkg"
+            elif echo "$has_prepare" | grep -qE "&& exit 1"; then
+                warn "Suspicious prepare hook with exit 1: [$pkg_name@$pkg_ver] $has_prepare"
+                log_report "SUSPICIOUS_PREPARE_HOOK|$pkg_name|$pkg_ver|$has_prepare|$pkg"
+            fi
+        fi
+
+        # Check for Wave 4 malicious optionalDependencies
+        local has_optional_dep
+        has_optional_dep=$(jq -r 'select(.optionalDependencies != null) | .optionalDependencies | to_entries[] | "\(.key):\(.value)"' "$pkg" 2>/dev/null)
+        if [[ -n "$has_optional_dep" ]]; then
+            if echo "$has_optional_dep" | grep -qE "79ac49eedf774dd4b0cfa308722bc463cfe5885c|github:tanstack/router"; then
+                local pkg_name; pkg_name=$(jq -r '.name // "unknown"' "$pkg" 2>/dev/null)
+                threat "Wave 4 TanStack malicious optionalDependency in [$pkg_name]: $has_optional_dep"
+                log_report "WAVE4_OPTIONAL_DEP|$pkg_name|$has_optional_dep|$pkg"
             fi
         fi
 
@@ -342,6 +403,7 @@ scan_preinstall() {
         pkg_name_full=$(jq -r '.name // ""' "$pkg" 2>/dev/null)
 
         case "$pkg_name_full" in
+            # Wave 3 - SAP CAP
             "mbt")
                 local ver; ver=$(jq -r '.version // ""' "$pkg" 2>/dev/null)
                 [[ "$ver" == "1.2.48" ]] && threat "COMPROMISED VERSION: $pkg_name_full@$ver in $pkg"
@@ -357,6 +419,53 @@ scan_preinstall() {
             "@cap-js/postgres")
                 local ver; ver=$(jq -r '.version // ""' "$pkg" 2>/dev/null)
                 [[ "$ver" == "2.2.2" ]] && threat "COMPROMISED VERSION: $pkg_name_full@$ver in $pkg"
+                ;;
+            # Wave 4 - TanStack (key packages that are most likely to be used)
+            "@tanstack/react-router")
+                local ver; ver=$(jq -r '.version // ""' "$pkg" 2>/dev/null)
+                [[ "$ver" == "1.169.5" || "$ver" == "1.169.8" ]] && threat "COMPROMISED VERSION (Wave 4 TanStack): $pkg_name_full@$ver in $pkg"
+                ;;
+            "@tanstack/vue-router")
+                local ver; ver=$(jq -r '.version // ""' "$pkg" 2>/dev/null)
+                [[ "$ver" == "1.169.5" || "$ver" == "1.169.8" ]] && threat "COMPROMISED VERSION (Wave 4 TanStack): $pkg_name_full@$ver in $pkg"
+                ;;
+            "@tanstack/solid-router")
+                local ver; ver=$(jq -r '.version // ""' "$pkg" 2>/dev/null)
+                [[ "$ver" == "1.169.5" || "$ver" == "1.169.8" ]] && threat "COMPROMISED VERSION (Wave 4 TanStack): $pkg_name_full@$ver in $pkg"
+                ;;
+            "@tanstack/router-core")
+                local ver; ver=$(jq -r '.version // ""' "$pkg" 2>/dev/null)
+                [[ "$ver" == "1.169.5" || "$ver" == "1.169.8" ]] && threat "COMPROMISED VERSION (Wave 4 TanStack): $pkg_name_full@$ver in $pkg"
+                ;;
+            "@tanstack/react-start")
+                local ver; ver=$(jq -r '.version // ""' "$pkg" 2>/dev/null)
+                [[ "$ver" == "1.167.68" || "$ver" == "1.167.71" ]] && threat "COMPROMISED VERSION (Wave 4 TanStack): $pkg_name_full@$ver in $pkg"
+                ;;
+            "@tanstack/router-plugin")
+                local ver; ver=$(jq -r '.version // ""' "$pkg" 2>/dev/null)
+                [[ "$ver" == "1.167.38" || "$ver" == "1.167.41" ]] && threat "COMPROMISED VERSION (Wave 4 TanStack): $pkg_name_full@$ver in $pkg"
+                ;;
+            "@tanstack/router-cli")
+                local ver; ver=$(jq -r '.version // ""' "$pkg" 2>/dev/null)
+                [[ "$ver" == "1.166.46" || "$ver" == "1.166.49" ]] && threat "COMPROMISED VERSION (Wave 4 TanStack): $pkg_name_full@$ver in $pkg"
+                ;;
+            "@tanstack/history")
+                local ver; ver=$(jq -r '.version // ""' "$pkg" 2>/dev/null)
+                [[ "$ver" == "1.161.9" || "$ver" == "1.161.12" ]] && threat "COMPROMISED VERSION (Wave 4 TanStack): $pkg_name_full@$ver in $pkg"
+                ;;
+            # Wave 4 - Mistral AI
+            "@mistralai/mistralai")
+                local ver; ver=$(jq -r '.version // ""' "$pkg" 2>/dev/null)
+                [[ "$ver" == "2.2.3" || "$ver" == "2.2.4" ]] && threat "COMPROMISED VERSION (Wave 4 Mistral): $pkg_name_full@$ver in $pkg"
+                ;;
+            "@mistralai/mistralai-azure"|"@mistralai/mistralai-gcp")
+                local ver; ver=$(jq -r '.version // ""' "$pkg" 2>/dev/null)
+                [[ "$ver" == "1.7.2" || "$ver" == "1.7.3" ]] && threat "COMPROMISED VERSION (Wave 4 Mistral): $pkg_name_full@$ver in $pkg"
+                ;;
+            # Wave 4 - OpenSearch
+            "@opensearch-project/opensearch")
+                local ver; ver=$(jq -r '.version // ""' "$pkg" 2>/dev/null)
+                [[ "$ver" == "3.6.2" ]] && threat "COMPROMISED VERSION (Wave 4 OpenSearch): $pkg_name_full@$ver in $pkg"
                 ;;
         esac
     done <<< "$pkg_files"
@@ -407,6 +516,19 @@ scan_persistence() {
                         threat "Dependabot impersonation workflow (secrets dump): $full_path"
                         log_report "PERSISTENCE_DEPENDABOT_WORKFLOW|$full_path"
                     fi
+                elif [[ "$ppath" == *"codeql_analysis.yml" ]]; then
+                    local has_codeql_dump
+                    has_codeql_dump=$(grep -c "toJSON(secrets)" "$full_path" 2>/dev/null)
+                    if [[ "$has_codeql_dump" -gt 0 ]]; then
+                        threat "Wave 4 injected CodeQL workflow (secrets dump): $full_path"
+                        log_report "PERSISTENCE_CODEQL_WORKFLOW|$full_path"
+                    fi
+                elif [[ "$ppath" == *"router_runtime.js" || "$ppath" == *"setup.mjs" ]]; then
+                    threat "Wave 4 Claude Code / VS Code payload: $full_path"
+                    log_report "PERSISTENCE_WAVE4_PAYLOAD|$full_path"
+                elif [[ "$ppath" == *"gh-token-monitor"* ]]; then
+                    threat "Wave 4 dead-man's switch service: $full_path (DISABLE BEFORE REVOKING TOKENS!)"
+                    log_report "PERSISTENCE_DEADMAN_SWITCH|$full_path"
                 else
                     warn "Suspicious persistence file: $full_path"
                     log_report "PERSISTENCE_FILE|$full_path"
@@ -557,8 +679,6 @@ scan_environment() {
 
         if [[ -d "$npm_cache/_cacache" ]]; then
             for tb_hash in "${KNOWN_TARBALLS[@]}"; do
-                # npm v7+ stores in _cacache/content-v2/sha512/
-                # but tarball shasums are sha1, stored in index-v5
                 local found_in_cache
                 found_in_cache=$(find "$npm_cache" -type f -name "*${tb_hash:0:12}*" 2>/dev/null | head -3)
                 if [[ -n "$found_in_cache" ]]; then
@@ -567,6 +687,34 @@ scan_environment() {
                 fi
             done
         fi
+
+        # Wave 4: Check npm tokens for threat description
+        if npm token list &>/dev/null 2>&1; then
+            local threat_tokens
+            threat_tokens=$(npm token list 2>/dev/null | grep -i "IfYouRevokeThisToken")
+            if [[ -n "$threat_tokens" ]]; then
+                threat "Wave 4 dead-man's switch npm token detected! DO NOT REVOKE BEFORE ISOLATING MACHINE."
+                log_report "WAVE4_THREAT_TOKEN|$threat_tokens"
+            fi
+        fi
+    fi
+
+    # Wave 4: Check for dead-man's switch systemd service (Linux)
+    if [[ -f "$HOME/.config/systemd/user/gh-token-monitor.service" ]]; then
+        threat "Wave 4 dead-man's switch systemd service exists! Disable before revoking tokens: systemctl --user stop gh-token-monitor"
+        log_report "WAVE4_SYSTEMD_SERVICE|$HOME/.config/systemd/user/gh-token-monitor.service"
+    fi
+
+    # Wave 4: Check for dead-man's switch LaunchAgent (macOS)
+    if [[ -f "$HOME/Library/LaunchAgents/com.user.gh-token-monitor.plist" ]]; then
+        threat "Wave 4 dead-man's switch LaunchAgent exists! Unload before revoking tokens: launchctl unload ~/Library/LaunchAgents/com.user.gh-token-monitor.plist"
+        log_report "WAVE4_LAUNCHAGENT|$HOME/Library/LaunchAgents/com.user.gh-token-monitor.plist"
+    fi
+
+    # Wave 4: Check for dead-man's switch script
+    if [[ -f "$HOME/.local/bin/gh-token-monitor.sh" ]]; then
+        threat "Wave 4 dead-man's switch script exists: $HOME/.local/bin/gh-token-monitor.sh"
+        log_report "WAVE4_MONITOR_SCRIPT|$HOME/.local/bin/gh-token-monitor.sh"
     fi
 }
 
@@ -584,11 +732,24 @@ scan_dependency_versions() {
     fi
 
     declare -A COMPROMISED=(
-        ["mbt@1.2.48"]="Mini Shai-Hulud (April 2026)"
-        ["@cap-js/db-service@2.10.1"]="Mini Shai-Hulud (April 2026)"
-        ["@cap-js/sqlite@2.2.2"]="Mini Shai-Hulud (April 2026)"
-        ["@cap-js/postgres@2.2.2"]="Mini Shai-Hulud (April 2026)"
+        # Wave 3 - SAP CAP
+        ["mbt@1.2.48"]="Mini Shai-Hulud Wave 3 (April 2026)"
+        ["@cap-js/db-service@2.10.1"]="Mini Shai-Hulud Wave 3 (April 2026)"
+        ["@cap-js/sqlite@2.2.2"]="Mini Shai-Hulud Wave 3 (April 2026)"
+        ["@cap-js/postgres@2.2.2"]="Mini Shai-Hulud Wave 3 (April 2026)"
+        # Wave 2
         ["@ctrl/tinycolor"]="Shai-Hulud 2.0 (November 2025)"
+        # Wave 4 - TanStack (key packages)
+        ["@tanstack/react-router"]="Mini Shai-Hulud Wave 4 (May 2026) - check version"
+        ["@tanstack/vue-router"]="Mini Shai-Hulud Wave 4 (May 2026) - check version"
+        ["@tanstack/solid-router"]="Mini Shai-Hulud Wave 4 (May 2026) - check version"
+        ["@tanstack/router-core"]="Mini Shai-Hulud Wave 4 (May 2026) - check version"
+        ["@tanstack/react-start"]="Mini Shai-Hulud Wave 4 (May 2026) - check version"
+        ["@tanstack/router-plugin"]="Mini Shai-Hulud Wave 4 (May 2026) - check version"
+        ["@tanstack/router-cli"]="Mini Shai-Hulud Wave 4 (May 2026) - check version"
+        ["@tanstack/history"]="Mini Shai-Hulud Wave 4 (May 2026) - check version"
+        ["@mistralai/mistralai"]="Mini Shai-Hulud Wave 4 (May 2026) - check version"
+        ["@opensearch-project/opensearch"]="Mini Shai-Hulud Wave 4 (May 2026) - check version"
     )
 
     while IFS= read -r lockfile; do
@@ -716,12 +877,17 @@ main() {
 
         echo ""
         warn "Recommended immediate actions:"
-        echo "  1. Rotate ALL credentials (npm tokens, GitHub PATs, cloud API keys)"
-        echo "  2. Revoke npm tokens: npm token list && npm token revoke <id>"
-        echo "  3. Check GitHub account: gh repo list --public | grep -iE 'shai|hulud'"
-        echo "  4. Review commit history for claude@users.noreply.github.com"
-        echo "  5. Check .claude/settings.json and .vscode/tasks.json"
-        echo "  6. Run: npm audit && npm install --ignore-scripts"
+        echo "  1. ISOLATE MACHINE FIRST (disconnect network)"
+        echo "  2. Check for dead-man's switch BEFORE revoking tokens:"
+        echo "     systemctl --user stop gh-token-monitor.service 2>/dev/null"
+        echo "     launchctl unload ~/Library/LaunchAgents/com.user.gh-token-monitor.plist 2>/dev/null"
+        echo "  3. Rotate ALL credentials (npm tokens, GitHub PATs, cloud API keys)"
+        echo "  4. Revoke npm tokens: npm token list && npm token revoke <id>"
+        echo "  5. Check GitHub account: gh repo list --public | grep -iE 'shai|hulud|kanly|sietch|ghola'"
+        echo "  6. Review commit history for claude@users.noreply.github.com"
+        echo "  7. Remove persistence artifacts (.claude/, .vscode/tasks.json, codeql_analysis.yml)"
+        echo "  8. Check for optionalDependencies with github:tanstack/router URL"
+        echo "  9. Run: npm install --ignore-scripts && npm audit"
     fi
 
     if [[ -n "$REPORT_FILE" ]]; then

@@ -6,21 +6,35 @@ Công cụ phát hiện và quét mã độc **Mini Shai-Hulud** — chiến d�
 
 ## Tổng quan
 
-"Mini Shai-Hulud" là wave thứ 3 trong chuỗi tấn công supply chain Shai-Hulud, được thực hiện bởi nhóm tin tặc **TeamPCP**, phát hiện vào **29/04/2026**. Chiến dịch này là cross-ecosystem (npm + PyPI), sử dụng **Bun runtime** để né tránh các công cụ endpoint security vốn chỉ giám sát Node.js.
+"Mini Shai-Hulud" là chiến dịch tấn công supply chain liên tục nhắm vào hệ sinh thái npm/Node.js, thực hiện bởi nhóm tin tặc **TeamPCP** (aliases: DeadCatx3, PCPcat, ShellForce, CipherForce), có liên kết với nhóm ransomware Vect. Tính đến tháng 5/2026, đã có **4 wave** với mức độ tinh vi leo thang.
 
 ### Lịch sử các wave tấn công
 
-| Wave | Thời gian | Đặc điểm chính |
-|---|---|---|
-| **Shai-Hulud 1.0** | Tháng 9/2025 | Sâu tự nhân bản qua npm, dùng `postinstall` script, hơn 500 packages bị nhiễm |
-| **Shai-Hulud 2.0** | Tháng 11/2025 | Chuyển sang `preinstall` script (không cần tương tác người dùng), thêm cơ chế hủy diệt home directory, hơn 25,000 repos bị ảnh hưởng, ~350 người dùng bị compromise |
-| **Mini Shai-Hulud** | Tháng 4/2026 | Đa hệ sinh thái (npm + PyPI), dùng Bun runtime thay Node.js để né detection, nhắm vào SAP CAP packages và PyTorch Lightning |
+| Wave | Thời gian | Mục tiêu chính | Kỹ thuật đặc trưng | Quy mô |
+|---|---|---|---|---|
+| **Shai-Hulud 1.0** | 09/2025 | Các package npm ngẫu nhiên qua credential phishing | `postinstall` script, sâu tự nhân bản, GitHub dead-drop repos | 500+ packages, 100+ dev accounts |
+| **Shai-Hulud 2.0** | 11/2025 | `@ctrl/tinycolor`, Zapier, ENS Domains | `preinstall` script (không cần tương tác), `bun_environment.js` obfuscate, `setup_bun.js`, hủy diệt `rm -rf ~/`, GitHub Actions self-hosted runner persistence (`SHA1HULUD`) | 492 packages, 25,000+ repos, ~350 users |
+| **Mini Shai-Hulud (Wave 3)** | 29/04–01/05/2026 | **npm:** `mbt`, `@cap-js/db-service`, `@cap-js/sqlite`, `@cap-js/postgres`, `intercom-client@7.0.4` (361K downloads/tuần) — **PyPI:** `lightning` (PyTorch Lightning) 2.6.2, 2.6.3 | `preinstall` hook + Bun runtime evasion, Claude Code SessionStart persistence, VS Code folderOpen tasks, Dependabot impersonation workflow injection, P2P dead-drop search (`OhNoWhatsGoingOnWithGitHub`), CIS-region exemption | 4 npm packages (SAP) + 1 (Intercom) + 2 PyPI |
+| **Mini Shai-Hulud (Wave 4)** | **10–11/05/2026** | **npm:** 42 `@tanstack/*` packages (12M+ downloads/tuần), ~40 `@uipath/*`, 3 `@mistralai/*`, 5 DraftLab/DraftAuth, ~20 `@squawk/*`, 3 MesaDev, 10 TallyUI, OpenSearch, và ~10 packages khác | **Kỹ thuật đột phá:** Orphaned commit qua fork + GitHub shared storage abuse, SLSA Build Level 3 provenance forgery, OIDC token extraction từ `Runner.Worker` memory (`/proc/{pid}/mem`), `optionalDependencies` + `prepare` hook vector, Session P2P network C2 (`filev2.getsession.org`), dead-man's switch (`rm -rf ~/` nếu token bị revoke), systemd/LaunchAgent persistence | **373+ phiên bản độc, 169+ packages, 1,800+ developers** bị ảnh hưởng |
 
 ---
 
 ## Packages bị ảnh hưởng
 
-Ngày 29/04/2026 (09:55–12:14 UTC), 4 package trong hệ sinh thái SAP CAP bị đầu độc, tất cả được publish từ tài khoản `cloudmtabot` (đã bị GitHub suspend):
+Dưới đây là danh sách tất cả package đã biết bị ảnh hưởng qua 4 wave tấn công Shai-Hulud (09/2025 – 05/2026).
+
+### Wave 1 & 2 — Shai-Hulud 1.0 & 2.0 (09–11/2025)
+
+| Package | Wave | Ghi chú |
+|---|---|---|
+| `@ctrl/tinycolor` | Wave 2 | Hàng triệu downloads/tuần, package phổ biến nhất bị ảnh hưởng |
+| Các package của Zapier | Wave 2 | Bị compromise qua credential phishing |
+| Các package của ENS Domains | Wave 2 | Bị compromise qua credential phishing |
+| 500+ packages khác | Wave 1 & 2 | Tự nhân bản qua npm token bị đánh cắp |
+
+### Wave 3 — SAP CAP Ecosystem (29/04/2026)
+
+4 package trong hệ sinh thái SAP CAP bị đầu độc ngày 29/04/2026 (09:55–12:14 UTC), tất cả được publish từ tài khoản `cloudmtabot` (đã bị GitHub suspend):
 
 | Package | Phiên bản độc | Weekly Downloads | Phiên bản an toàn |
 |---|---|---|---|
@@ -29,7 +43,145 @@ Ngày 29/04/2026 (09:55–12:14 UTC), 4 package trong hệ sinh thái SAP CAP b�
 | `@cap-js/sqlite` | 2.2.2 | ~250,000 | 2.4.0 |
 | `@cap-js/postgres` | 2.2.2 | ~10,000 | 2.3.0 |
 
-### Rủi ro transitive
+### Wave 3 — Các package khác (29/04–01/05/2026)
+
+| Package | Phiên bản độc | Weekly Downloads | Hệ sinh thái |
+|---|---|---|---|
+| `intercom-client` | 7.0.4 | ~361,000 | npm |
+| `lightning` (PyTorch Lightning) | 2.6.2, 2.6.3 | ~350,000 | PyPI |
+
+---
+
+## Wave 4 — TanStack Compromise (11/05/2026) 🆕
+
+### Tổng quan
+
+Ngày 11/05/2026, kẻ tấn công đã chiếm quyền publish của **TanStack** (một trong những thư viện React phổ biến nhất, hơn 12 triệu weekly downloads) thông qua một kỹ thuật chưa từng thấy: **orphaned commit qua fork** kết hợp với **SLSA Build Level 3 provenance forgery**.
+
+**CVE:** CVE-2026-45321 | **GHSA:** GHSA-g7cv-rxg3-hmpx
+
+### Attack chain
+
+Đây là attack vector phức tạp nhất trong lịch sử npm:
+
+1. **Orphaned commit:** Kẻ tấn công tạo fork `TanStack/router`, push một commit "mồ côi" (không có parent history, không thuộc branch nào) chứa `@tanstack/setup` package giả với `prepare` hook
+2. **GitHub shared storage abuse:** Commit mồ côi có thể truy cập qua URL `github:tanstack/router#79ac49ee...` nhờ GitHub lưu trữ chung object storage giữa repo và fork
+3. **Cache poisoning:** PR `pull_request_target` được mở, chạy code của fork trong security context của base repo, đầu độc pnpm store cache
+4. **OIDC token extraction:** Khi `release.yml` chạy với cache đã nhiễm độc, Python script đọc `/proc/{pid}/mem` của `Runner.Worker` process, trích xuất OIDC token (kỹ thuật giống hệt CVE-2025-30066 tj-actions/changed-files tháng 3/2025)
+5. **82 phiên bản độc** được publish với **SLSA Build Level 3 provenance hợp lệ** từ chính TanStack CI/CD pipeline thật
+6. **Worm lan rộng** qua OIDC token bị đánh cắp sang ~160 packages khác
+
+### 42 @tanstack Packages Bị Ảnh Hưởng (84 Phiên Bản Độc)
+
+Tất cả package trong hệ sinh thái TanStack Router/Start:
+
+| Package | Phiên bản độc | Package | Phiên bản độc |
+|---|---|---|---|
+| `@tanstack/react-router` | 1.169.5, 1.169.8 | `@tanstack/vue-router` | 1.169.5, 1.169.8 |
+| `@tanstack/solid-router` | 1.169.5, 1.169.8 | `@tanstack/router-core` | 1.169.5, 1.169.8 |
+| `@tanstack/react-start` | 1.167.68, 1.167.71 | `@tanstack/solid-start` | 1.167.65, 1.167.68 |
+| `@tanstack/vue-start` | 1.167.61, 1.167.64 | `@tanstack/router-plugin` | 1.167.38, 1.167.41 |
+| `@tanstack/router-cli` | 1.166.46, 1.166.49 | `@tanstack/router-generator` | 1.166.45, 1.166.48 |
+| `@tanstack/history` | 1.161.9, 1.161.12 | `@tanstack/router-utils` | 1.161.11, 1.161.14 |
+| `@tanstack/react-router-devtools` | 1.166.16, 1.166.19 | `@tanstack/router-devtools` | 1.166.16, 1.166.19 |
+| `@tanstack/router-devtools-core` | 1.167.6, 1.167.9 | `@tanstack/solid-router-devtools` | 1.166.16, 1.166.19 |
+| `@tanstack/vue-router-devtools` | 1.166.16, 1.166.19 | `@tanstack/eslint-plugin-router` | 1.161.9, 1.161.12 |
+| `@tanstack/eslint-plugin-start` | 0.0.4, 0.0.7 | `@tanstack/react-router-ssr-query` | 1.166.15, 1.166.18 |
+| `@tanstack/solid-router-ssr-query` | 1.166.15, 1.166.18 | `@tanstack/vue-router-ssr-query` | 1.166.15, 1.166.18 |
+| `@tanstack/router-ssr-query-core` | 1.168.3, 1.168.6 | `@tanstack/router-vite-plugin` | 1.166.53, 1.166.56 |
+| `@tanstack/nitro-v2-vite-plugin` | 1.154.12, 1.154.15 | `@tanstack/start-client-core` | 1.168.5, 1.168.8 |
+| `@tanstack/start-server-core` | 1.167.33, 1.167.36 | `@tanstack/start-plugin-core` | 1.169.23, 1.169.26 |
+| `@tanstack/start-fn-stubs` | 1.161.9, 1.161.12 | `@tanstack/start-storage-context` | 1.166.38, 1.166.41 |
+| `@tanstack/start-static-server-functions` | 1.166.44, 1.166.47 | `@tanstack/virtual-file-routes` | 1.161.10, 1.161.13 |
+| `@tanstack/react-start-client` | 1.166.51, 1.166.54 | `@tanstack/react-start-server` | 1.166.55, 1.166.58 |
+| `@tanstack/react-start-rsc` | 0.0.47, 0.0.50 | `@tanstack/solid-start-client` | 1.166.50, 1.166.53 |
+| `@tanstack/solid-start-server` | 1.166.54, 1.166.57 | `@tanstack/vue-start-client` | 1.166.46, 1.166.49 |
+| `@tanstack/vue-start-server` | 1.166.50, 1.166.53 | `@tanstack/arktype-adapter` | 1.166.12, 1.166.15 |
+| `@tanstack/valibot-adapter` | 1.166.12, 1.166.15 | `@tanstack/zod-adapter` | 1.166.12, 1.166.15 |
+
+**Confirmed-clean:** `@tanstack/query*`, `@tanstack/table*`, `@tanstack/form*`, `@tanstack/virtual*`, `@tanstack/store`
+
+### Worm lan sang ~120 packages khác
+
+| Tổ chức | Số packages | Ví dụ |
+|---|---|---|
+| **UiPath** | ~40+ | `@uipath/agent.sdk`, `@uipath/apollo-core`, `@uipath/cli`, `@uipath/auth`, ... |
+| **Mistral AI** | 3 | `@mistralai/mistralai` (2.2.3, 2.2.4), `-azure`, `-gcp` variants |
+| **DraftLab/DraftAuth** | 5 | `@draftlab/auth`, `@draftlab/db`, `@draftauth/client`, `@draftauth/core`, ... |
+| **Squawk (hàng không)** | ~20 | `@squawk/airport-data`, `@squawk/weather`, `@squawk/mcp`, ... |
+| **MesaDev** | 3 | `@mesadev/rest`, `@mesadev/sdk`, `@mesadev/saguaro` |
+| **TallyUI** | 10 | `@tallyui/components`, `@tallyui/core`, `@tallyui/pos`, ... |
+| **OpenSearch** | 1 | `@opensearch-project/opensearch` (3.6.2) |
+| **Khác** | ~10 | `safe-action`, `cmux-agent-mcp`, `nextmove-mcp`, `ts-dna`, `cross-stitch`, `ml-toolkit-ts`, ... |
+
+### Kỹ thuật mới (chỉ có trong Wave 4)
+
+1. **SLSA Build Level 3 provenance giả mạo:** Package độc mang provenance attestation hợp lệ từ chính TanStack CI/CD
+2. **Orphaned commit qua fork:** Commit mồ côi không thuộc branch nào, chỉ truy cập được qua hash, dùng GitHub shared object storage
+3. **OIDC token extraction từ Runner.Worker memory:** Python đọc `/proc/{pid}/mem` — giống CVE-2025-30066
+4. **Session P2P network làm C2:** `filev2.getsession.org` — không có máy chủ C2 truyền thống để block
+5. **Dead-man's switch:** Token npm mới với description `IfYouRevokeThisTokenItWillWipeTheComputerOfTheOwner` — nếu revoke token, payload hủy `rm -rf ~/`
+6. **`optionalDependencies` + `prepare` hook:** Vector mới thay cho `preinstall`, tránh bị static analysis phát hiện
+7. **Double-tap publish:** Hai phiên bản độc cách nhau vài phút
+8. **`exit 1` trong prepare hook:** Payload chạy xong, npm log script failure — tưởng lỗi nhưng thực chất đã nhiễm
+
+### Payload `router_init.js`
+
+- **Kích thước:** 2,341,681 bytes (mỗi package tăng từ ~190 KB → ~905 KB)
+- **SHA-256:** `ab4fcadaec49c03278063dd269ea5eef82d24f2124a8e15d7b90f2fa8601266c`
+- **Vị trí:** Đặt ở package root, không có trong `files` field → chứng minh giả mạo ngoài build process
+- **Obfuscation 3 lớp:** obfuscator.io → Fisher-Yates substitution cipher (PBKDF2-SHA256, salt `svksjrhjkcejg`, 200,000 iterations) → AES-256-GCM (11 payloads)
+- **Master key:** `0c0e873033875f1bc471eda37e3b9d0f9b89bd41a4bbb4f86746caa2176c40aa`
+- **Campaign string:** `EveryBoiWeBuildIsAWormyBoi`
+
+### `optionalDependencies` Injection
+
+Mỗi `package.json` bị nhiễm có thêm:
+```json
+"optionalDependencies": {
+  "@tanstack/setup": "github:tanstack/router#79ac49eedf774dd4b0cfa308722bc463cfe5885c"
+}
+```
+
+Khi `npm install` resolve GitHub dependency, `prepare` hook chạy:
+```json
+{"scripts": {"prepare": "bun run tanstack_runner.js && exit 1"}}
+```
+
+### Persistence mới trong Wave 4
+
+Ngoài Claude Code & VS Code hooks, Wave 4 thêm **dead-man's switch cấp hệ thống**:
+
+| OS | Path |
+|---|---|
+| Linux | `~/.local/bin/gh-token-monitor.sh` |
+| Linux | `~/.config/systemd/user/gh-token-monitor.service` |
+| macOS | `~/Library/LaunchAgents/com.user.gh-token-monitor.plist` |
+
+Các file này poll `api.github.com/user` mỗi 60 giây. Nếu token bị revoke (HTTP 40x) → thực thi `rm -rf ~/`.
+
+**Cảnh báo:** Phải vô hiệu hóa service này TRƯỚC KHI xoay credentials.
+
+### Indicator riêng của Wave 4
+
+| IOC | Giá trị |
+|---|---|
+| **Malicious file** | `router_init.js` (2.3 MB) |
+| **Malicious file** | `tanstack_runner.js` (2.3 MB) |
+| **optionalDependencies hash** | `79ac49eedf774dd4b0cfa308722bc463cfe5885c` |
+| **Attacker GitHub account** | `voicproducoes` (ID 269549300) |
+| **Attacker GitHub account** | `zblgg` (ID 127806521) |
+| **Fork name evasion** | `zblgg/configuration` (đổi tên để né fork-list search) |
+| **C2 (Session P2P)** | `filev2.getsession.org` |
+| **C2 (secondary)** | `api.masscan.cloud` |
+| **C2 (tertiary)** | `git-tanstack.com` |
+| **Payload staging** | `litter.catbox.moe/h8nc9u.js`, `litter.catbox.moe/7rrc6l.mjs` |
+| **Campaign PBKDF2 salt** | `svksjrhjkcejg` |
+| **Campaign string** | `EveryBoiWeBuildIsAWormyBoi` |
+| **npm token description** | `IfYouRevokeThisTokenItWillWipeTheComputerOfTheOwner` |
+| **Repo naming** | `siridar-ghola-567`, `tleilaxu-ornithopter-43` |
+| **Branch pattern** | `dependabot/github_actions/format/{dune-word}` |
+| **Dune wordlist** | atreides, fremen, sandworm, harkonnen, melange, ghola, kanly, sietch, sardaukar, mentat, ornithopter, heighliner, thumper, tleilaxu, stillsuit, ... (30 từ) |
 
 `@cap-js/sqlite@2.2.2` khai báo dependency `@cap-js/db-service@^2.10.0`. Với range `^2.10.0`, một lần `npm install` sạch có thể kéo phiên bản độc `2.10.1` mà không cần package này được liệt kê trực tiếp trong `package.json`.
 
@@ -247,23 +399,41 @@ Vector publish của `mbt` chưa được xác nhận công khai, ngoài việc 
 | IOC | Giá trị |
 |---|---|
 | Description string | `"A Mini Shai-Hulud has Appeared"` |
-| Repo naming pattern | Hai từ vũ trụ Dune + 1-3 chữ số (vd: `kanly-sietch-78`, `ghola-ornithopter-356`) |
+| Repo naming pattern | Hai từ vũ trụ Dune + 1-3 chữ số (vd: `kanly-sietch-78`, `ghola-ornithopter-356`, `siridar-ghola-567`, `tleilaxu-ornithopter-43`) |
 | P2P commit search string | `OhNoWhatsGoingOnWithGitHub` |
 | Author signature | `claude@users.noreply.github.com` |
 | Commit message | `"chore: update dependencies"` |
 | Compromised npm account | `cloudmtabot` (suspended) |
+| Attacker GitHub (Wave 4) | `voicproducoes` (ID 269549300, created 2026-03-19) |
+| Attacker GitHub (Wave 4) | `zblgg` (ID 127806521), fork renamed to `zblgg/configuration` |
+| Attacker email | `voicproducoes@gmail.com` |
 
 ### Payload IOCs
 
 | IOC | Giá trị |
 |---|---|
-| Cipher salt | `ctf-scramble-v2` |
+| Cipher salt (Wave 3) | `ctf-scramble-v2` |
+| Cipher salt (Wave 4) | `svksjrhjkcejg` (PBKDF2, 200,000 iterations) |
+| Campaign string (Wave 4) | `EveryBoiWeBuildIsAWormyBoi` |
 | Daemonization env var | `__DAEMONIZED` |
 | Lockfile marker | `tmp.987654321.lock` |
 | Workflow injection branch | `dependabout/github_actions/format/setup-formatter` |
+| Wave 4 workflow injection branch | `dependabot/github_actions/format/{dune-word}` (30 Dune từ) |
 | Injected workflow file | `.github/workflows/format-check.yml` |
+| Wave 4 injected workflow | `.github/workflows/codeql_analysis.yml` (2 variants) |
+| Wave 4 optionalDependencies | `"@tanstack/setup": "github:tanstack/router#79ac49ee..."` |
+| Wave 4 malicious orphan commit | `79ac49eedf774dd4b0cfa308722bc463cfe5885c` |
+| Wave 4 npm token description | `IfYouRevokeThisTokenItWillWipeTheComputerOfTheOwner` |
 
-### File Hashes (SHA-256) — Mini Shai-Hulud (Wave 3)
+### File Hashes (SHA-256) — Mini Shai-Hulud Wave 4 — TanStack (11/05/2026) 🆕
+
+| File | SHA-256 |
+|---|---|
+| `router_init.js` (tất cả @tanstack packages) | `ab4fcadaec49c03278063dd269ea5eef82d24f2124a8e15d7b90f2fa8601266c` |
+| `tanstack_runner.js` (attacker commit) | `2ec78d556d696e208927cc503d48e4b5eb56b31abc2870c2ed2e98d6be27fc96` |
+| `@tanstack/setup` package.json (attacker commit) | `7c12d8614c624c70d6dd6fc2ee289332474abaa38f70ebe2cdef064923ca3a9b` |
+
+### File Hashes (SHA-256) — Mini Shai-Hulud Wave 3 (Tháng 4/2026)
 
 | File | SHA-256 |
 |---|---|
@@ -297,10 +467,23 @@ Vector publish của `mbt` chưa được xác nhận công khai, ngoài việc 
 - **Network:** Outbound HTTPS đến `api.github.com/user/repos` và `api.github.com/search/commits?q=OhNoWhatsGoingOnWithGitHub` trong quá trình install
 - **Shai-Hulud 2.0 specific:** GitHub runner registration với flag `--name SHA1HULUD`
 - **Shai-Hulud 2.0 specific:** File `bun_environment.js` >= 9 MB
+- **Wave 4 specific:** `optionalDependencies` chứa `github:tanstack/router#79ac49ee...`
+- **Wave 4 specific:** File `router_init.js` ở package root (không có trong `files` field)
+- **Wave 4 specific:** Tarball size anomaly (từ ~190 KB → ~905 KB)
+- **Wave 4 specific:** Double-tap publish (2 version cách nhau vài phút)
+- **Wave 4 specific:** `prepare` hook chạy obfuscated JS qua Bun với `&& exit 1`
+- **Wave 4 specific:** Python đọc `/proc/*/mem` trong CI/CD
+- **Wave 4 specific:** systemd service `gh-token-monitor.service` hoặc LaunchAgent `com.user.gh-token-monitor.plist`
 
-### C2 Endpoint (Shai-Hulud 2.0)
+### C2 Endpoints
 
-- `hxxps://webhook[.]site/bb8ca5f6-4175-45d2-b042-fc9ebb8170b7`
+| Wave | Endpoint |
+|---|---|
+| Shai-Hulud 2.0 | `hxxps://webhook[.]site/bb8ca5f6-4175-45d2-b042-fc9ebb8170b7` |
+| Mini Shai-Hulud Wave 4 | `filev2.getsession[.]org/file/` (Session P2P network) |
+| Mini Shai-Hulud Wave 4 | `api.masscan[.]cloud/v2/upload` |
+| Mini Shai-Hulud Wave 4 | `git-tanstack[.]com` |
+| Mini Shai-Hulud Wave 4 | `litter.catbox[.]moe/h8nc9u.js`, `litter.catbox[.]moe/7rrc6l.mjs` |
 
 ---
 

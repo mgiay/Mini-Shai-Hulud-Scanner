@@ -18,9 +18,31 @@
 
 ## Tổng quan
 
-**Mini-Shai-Hulud-Scanner.sh** là công cụ dòng lệnh dành cho Linux, quét và phát hiện dấu vết của mã độc Mini Shai-Hulud / Shai-Hulud — chuỗi tấn công supply chain nhắm vào hệ sinh thái npm/Node.js từ tháng 9/2025 đến nay.
+**Mini-Shai-Hulud-Scanner.sh** v1.1.0 là công cụ dòng lệnh dành cho Linux, quét và phát hiện dấu vết của mã độc Mini Shai-Hulud / Shai-Hulud — chuỗi tấn công supply chain do nhóm **TeamPCP** thực hiện, nhắm vào hệ sinh thái npm/Node.js (và PyPI) từ tháng 9/2025 đến nay.
 
-Script thực hiện 11 module quét độc lập, bao phủ toàn bộ attack chain: từ file payload trên đĩa, IOC strings, persistence mechanism, cho đến process đang chạy và GitHub dead-drop repos.
+### Phạm vi phát hiện
+
+Script bao phủ **toàn bộ 4 wave tấn công** đã biết:
+
+| Wave | Thời gian | Phạm vi phát hiện |
+|---|---|---|
+| Shai-Hulud 1.0 | 09/2025 | `bundle.js`, `postinstall` scripts, C2 endpoints |
+| Shai-Hulud 2.0 | 11/2025 | `setup_bun.js`, `bun_environment.js`, SHA1HULUD runner, `preinstall` hooks, C2 webhook |
+| Mini Shai-Hulud (Wave 3) | 04/2026 | SAP CAP (`mbt`, `@cap-js/*`), `intercom-client`, `setup.mjs`, `execution.js`, Claude Code hooks, VS Code tasks, Dependabot impersonation |
+| Mini Shai-Hulud (Wave 4) | 05/2026 | 42 `@tanstack/*` packages, 40+ `@uipath/*`, `@mistralai/*`, `router_init.js`, `tanstack_runner.js`, `optionalDependencies` vector, `prepare` hook, dead-man's switch (systemd/LaunchAgent), Session P2P C2, SLSA provenance forgery detection |
+
+### Chỉ số IOC được bao phủ
+
+| Loại IOC | Số lượng |
+|---|---|
+| Known-malicious SHA-256 hashes | **16** (cả 4 wave) |
+| Known-malicious tarball shasums | **4** (Wave 3) |
+| IOC strings | **22** (cả 4 wave) |
+| Malicious filenames | **7** (cả 4 wave) |
+| Persistence paths | **13** (cả 4 wave) |
+| Compromised version checks | **20+** packages |
+
+Script thực hiện **11 module quét độc lập**, bao phủ toàn bộ attack chain: file payload, IOC strings, persistence mechanisms, process đang chạy, GitHub dead-drop repos, npm token threats, và dead-man's switch services.
 
 ---
 
@@ -36,7 +58,6 @@ Script thực hiện 11 module quét độc lập, bao phủ toàn bộ attack c
 | `grep` | Có | Quét IOC strings |
 | `jq` | Có | Phân tích JSON (package.json, lock files) |
 | `stat` | Có | Kiểm tra kích thước file |
-| `du` | Có | Phân tích dung lượng |
 | `gh` CLI | Không | Quét GitHub dead-drop repos (chỉ với `-g`) |
 | `pgrep` | Không | Quét process (chỉ với `-p`, tự bỏ qua nếu thiếu) |
 
@@ -141,8 +162,19 @@ sudo ./Mini-Shai-Hulud-Scanner.sh /
 | `Sha1-Hulud: The Second Coming` | Description của Shai-Hulud 2.0 repo |
 | `__DAEMONIZED` | Biến môi trường daemon hóa payload |
 | `tmp.987654321.lock` | Lockfile marker của payload |
-| `dependabout/github_actions/format/setup-formatter` | Branch typosquat Dependabot |
-| `cloudmtabot` | Tài khoản npm bị compromise |
+| `dependabout/github_actions/format/setup-formatter` | Branch typosquat Dependabot (Wave 3) |
+| `dependabot/github_actions/format/` | Branch pattern Wave 4 (30 Dune từ) |
+| `cloudmtabot` | Tài khoản npm bị compromise (Wave 3) |
+| `79ac49eedf774dd4b0cfa308722bc463cfe5885c` | Orphan commit hash (Wave 4 TanStack) |
+| `svksjrhjkcejg` | PBKDF2 salt Wave 4 payload |
+| `EveryBoiWeBuildIsAWormyBoi` | Campaign internal name Wave 4 |
+| `IfYouRevokeThisTokenItWillWipeTheComputerOfTheOwner` | npm token threat description Wave 4 |
+| `filev2.getsession.org` | Session P2P C2 (Wave 4) |
+| `api.masscan.cloud` | Secondary C2 (Wave 4) |
+| `git-tanstack.com` | Attacker-controlled domain (Wave 4) |
+| `litter.catbox.moe` | Payload staging (Wave 4) |
+| `voicproducoes` | Attacker GitHub account (Wave 4) |
+| `gh-token-monitor` | Dead-man's switch service (Wave 4) |
 
 **Phạm vi tìm kiếm:** File `*.js`, `*.mjs`, `*.json`, `*.ts`, `*.yml`, `*.yaml`, `*.sh`, `*.py`, `*.txt`, `*.md`.
 
@@ -166,6 +198,8 @@ sudo ./Mini-Shai-Hulud-Scanner.sh /
 | `setup_bun.js` | Shai-Hulud 2.0 (Wave 2) |
 | `bun_environment.js` | Shai-Hulud 2.0 (Wave 2) |
 | `bundle.js` | Shai-Hulud 1.0 (Wave 1) |
+| `router_init.js` | Mini Shai-Hulud Wave 4 — TanStack (2.3 MB) |
+| `tanstack_runner.js` | Mini Shai-Hulud Wave 4 — TanStack (2.3 MB) |
 
 **Kết quả đầu ra khi phát hiện:**
 ```
@@ -198,30 +232,51 @@ Module này cũng hiển thị kích thước và SHA-256 hash của file để 
 
 ---
 
-### Module 5: Suspicious Preinstall Script Audit
+### Module 5: Suspicious Preinstall/Prepare Script Audit
 
-**Mục đích:** Phát hiện `preinstall` scripts độc hại trong `package.json` — vector lây nhiễm chính.
+**Mục đích:** Phát hiện `preinstall` và `prepare` scripts độc hại trong `package.json` — vector lây nhiễm chính của tất cả các wave. Wave 4 dùng `prepare` hook trong `optionalDependencies` thay vì `preinstall`.
 
 **Cách hoạt động:**
 1. Tìm tất cả file `package.json` trong thư mục quét
-2. Trích xuất `scripts.preinstall` nếu có
-3. Cảnh báo các script tham chiếu đến file độc (`setup.mjs`, `execution.js`) hoặc download Bun runtime
-4. Đối chiếu `name` + `version` với danh sách package đã biết là độc
+2. Trích xuất `scripts.preinstall` và `scripts.prepare` nếu có
+3. Cảnh báo các script tham chiếu đến file độc (`setup.mjs`, `execution.js`, `tanstack_runner.js`) hoặc download Bun runtime
+4. **Wave 4 specific:** Phát hiện `optionalDependencies` chứa `github:tanstack/router#79ac49ee...`
+5. **Wave 4 specific:** Phát hiện `prepare` hook với `bun run tanstack_runner.js && exit 1`
+6. Đối chiếu `name` + `version` với danh sách package đã biết là độc (Wave 3 + Wave 4)
 
 **Danh sách version bị flag:**
 
-| Package | Version độc |
-|---|---|
-| `mbt` | 1.2.48 |
-| `@cap-js/db-service` | 2.10.1 |
-| `@cap-js/sqlite` | 2.2.2 |
-| `@cap-js/postgres` | 2.2.2 |
+| Package | Version độc | Wave |
+|---|---|---|
+| `mbt` | 1.2.48 | Wave 3 |
+| `@cap-js/db-service` | 2.10.1 | Wave 3 |
+| `@cap-js/sqlite` | 2.2.2 | Wave 3 |
+| `@cap-js/postgres` | 2.2.2 | Wave 3 |
+| `@tanstack/react-router` | 1.169.5, 1.169.8 | Wave 4 |
+| `@tanstack/vue-router` | 1.169.5, 1.169.8 | Wave 4 |
+| `@tanstack/solid-router` | 1.169.5, 1.169.8 | Wave 4 |
+| `@tanstack/router-core` | 1.169.5, 1.169.8 | Wave 4 |
+| `@tanstack/react-start` | 1.167.68, 1.167.71 | Wave 4 |
+| `@tanstack/router-plugin` | 1.167.38, 1.167.41 | Wave 4 |
+| `@tanstack/router-cli` | 1.166.46, 1.166.49 | Wave 4 |
+| `@tanstack/history` | 1.161.9, 1.161.12 | Wave 4 |
+| `@mistralai/mistralai` | 2.2.3, 2.2.4 | Wave 4 |
+| `@mistralai/mistralai-azure` | 1.7.2, 1.7.3 | Wave 4 |
+| `@mistralai/mistralai-gcp` | 1.7.2, 1.7.3 | Wave 4 |
+| `@opensearch-project/opensearch` | 3.6.2 | Wave 4 |
 
 **Kết quả đầu ra khi phát hiện:**
 ```
 [WARN]  Package [my-package@1.0.0] has preinstall script: node setup.mjs
 [THREAT]   -> DANGEROUS: preinstall references known malicious file or downloads Bun
 [THREAT] COMPROMISED VERSION: @cap-js/sqlite@2.2.2 in /project/package.json
+
+# Wave 4 specific outputs:
+[THREAT] Wave 4 TanStack prepare hook: [@tanstack/setup@0.0.1] bun run tanstack_runner.js && exit 1
+[WARN]  Suspicious prepare hook with exit 1: [evil-pkg@1.0.0] node payload.js && exit 1
+[THREAT] Wave 4 TanStack malicious optionalDependency in [@tanstack/react-router]: @tanstack/setup:github:tanstack/router#79ac49ee...
+[THREAT] COMPROMISED VERSION (Wave 4 TanStack): @tanstack/react-router@1.169.5 in /project/package.json
+[THREAT] COMPROMISED VERSION (Wave 4 Mistral): @mistralai/mistralai@2.2.3 in /project/package.json
 ```
 
 ---
@@ -239,6 +294,13 @@ Module này cũng hiển thị kích thước và SHA-256 hash của file để 
 | `.github/workflows/format-check.yml` | Dependabot impersonation | Chứa `toJSON(secrets)` |
 | `.github/workflows/discussion.yaml` | Self-hosted runner registration | File tồn tại |
 | `.github/workflows/shai-hulud-workflow.yml` | Workflow độc của Shai-Hulud 1.0/2.0 | File tồn tại |
+| `.github/workflows/codeql_analysis.yml` | Wave 4 injected workflow — dump `toJSON(secrets)` | Chứa `toJSON(secrets)` |
+| `.claude/router_runtime.js` | Wave 4 Claude Code payload self-copy | File tồn tại |
+| `.claude/setup.mjs` | Wave 4 ESM loader shim | File tồn tại |
+| `.vscode/setup.mjs` | Wave 4 VS Code payload shim | File tồn tại |
+| `.local/bin/gh-token-monitor.sh` | Wave 4 dead-man's switch script (Linux) | File tồn tại |
+| `.config/systemd/user/gh-token-monitor.service` | Wave 4 dead-man's switch systemd service | File tồn tại |
+| `Library/LaunchAgents/com.user.gh-token-monitor.plist` | Wave 4 dead-man's switch LaunchAgent (macOS) | File tồn tại |
 
 **Phạm vi quét:**
 - `$HOME` của user hiện tại
@@ -250,6 +312,9 @@ Module này cũng hiển thị kích thước và SHA-256 hash của file để 
 [THREAT] Claude Code SessionStart hook: /home/user/project/.claude/settings.json
 [THREAT] VS Code folderOpen task: /home/user/project/.vscode/tasks.json -> node /tmp/payload.js
 [THREAT] Dependabot impersonation workflow (secrets dump): /home/user/project/.github/workflows/format-check.yml
+[THREAT] Wave 4 injected CodeQL workflow (secrets dump): /home/user/project/.github/workflows/codeql_analysis.yml
+[THREAT] Wave 4 Claude Code / VS Code payload: /home/user/project/.claude/router_runtime.js
+[THREAT] Wave 4 dead-man's switch service: /home/user/.config/systemd/user/gh-token-monitor.service (DISABLE BEFORE REVOKING TOKENS!)
 ```
 
 ---
@@ -307,6 +372,10 @@ Module này cũng hiển thị kích thước và SHA-256 hash của file để 
 | Token lộ trong env | Kiểm tra `NPM_TOKEN`, `GH_TOKEN`, `GITHUB_TOKEN` |
 | Bun binary đáng ngờ | Kiểm tra Bun không được cài qua `dpkg`/`rpm` |
 | Tarball độc trong npm cache | Tìm hash của tarball đã biết trong `~/.npm/_cacache` |
+| **Wave 4:** npm token đe dọa | `npm token list` tìm token có description `IfYouRevokeThisToken...` |
+| **Wave 4:** Dead-man's switch systemd | `~/.config/systemd/user/gh-token-monitor.service` |
+| **Wave 4:** Dead-man's switch LaunchAgent | `~/Library/LaunchAgents/com.user.gh-token-monitor.plist` |
+| **Wave 4:** Dead-man's switch script | `~/.local/bin/gh-token-monitor.sh` |
 
 **Kết quả đầu ra khi phát hiện:**
 ```
@@ -315,6 +384,9 @@ Module này cũng hiển thị kích thước và SHA-256 hash của file để 
 [WARN]  Bun runtime found at: /usr/local/bin/bun
 [WARN]    -> Bun was NOT installed via system package manager
 [THREAT] Known malicious tarball found in npm cache: 0af7415d6575...
+[THREAT] Wave 4 dead-man's switch npm token detected! DO NOT REVOKE BEFORE ISOLATING MACHINE.
+[THREAT] Wave 4 dead-man's switch systemd service exists! Disable before revoking tokens: systemctl --user stop gh-token-monitor
+[THREAT] Wave 4 dead-man's switch LaunchAgent exists! Unload before revoking tokens: launchctl unload ...
 ```
 
 ---
@@ -330,8 +402,10 @@ Module này cũng hiển thị kích thước và SHA-256 hash của file để 
 
 **Kết quả đầu ra khi phát hiện:**
 ```
-[THREAT] Compromised package in lockfile: mbt@1.2.48 in /project/package-lock.json (Mini Shai-Hulud, April 2026)
+[THREAT] Compromised package in lockfile: mbt@1.2.48 in /project/package-lock.json (Mini Shai-Hulud Wave 3, April 2026)
 [WARN]  Potentially compromised package: @ctrl/tinycolor in /project/yarn.lock (Shai-Hulud 2.0, November 2025)
+[WARN]  Potentially compromised package: @tanstack/react-router in /project/package-lock.json (Mini Shai-Hulud Wave 4, May 2026 - check version)
+[WARN]  Potentially compromised package: @mistralai/mistralai in /project/yarn.lock (Mini Shai-Hulud Wave 4, May 2026 - check version)
 ```
 
 ---
@@ -605,9 +679,16 @@ Khi script phát hiện `[THREAT]`, thực hiện theo trình tự sau:
 │  - Kiểm tra commit history: git log --all --author=...  │
 │  - Xóa dead-drop repos nếu tìm thấy                     │
 ├─────────────────────────────────────────────────────────┤
+│  3. VÔ HIỆU DEAD-MAN'S SWITCH (WAVE 4 — LÀM TRƯỚC!)    │
+│  - Linux: systemctl --user stop gh-token-monitor        │
+│  - macOS: launchctl unload ...gh-token-monitor.plist    │
+│  - Xóa ~/.local/bin/gh-token-monitor.sh                 │
+├─────────────────────────────────────────────────────────┤
 │  4. DỌN SẠCH HỆ THỐNG                                  │
-│  - Xóa file payload: setup.mjs, execution.js, ...       │
-│  - Xóa persistence: .claude/settings.json, .vscode/...   │
+│  - Xóa file payload: setup.mjs, execution.js,           │
+│    router_init.js, tanstack_runner.js, ...              │
+│  - Xóa persistence: .claude/, .vscode/tasks.json,       │
+│    .vscode/setup.mjs, codeql_analysis.yml               │
 │  - Xóa node_modules và cài lại từ lock file sạch        │
 │  - npm cache clean --force                               │
 ├─────────────────────────────────────────────────────────┤
@@ -637,13 +718,23 @@ gh repo list --public --limit 200 --json name,description | \
   jq -r '.[] | select(.description | test("Shai-Hulud|Mini Shai-Hulud")) | .name' | \
   while read repo; do gh repo delete "$repo" --confirm; done
 
+# 0. VÔ HIỆU DEAD-MAN'S SWITCH TRƯỚC (Wave 4 — bắt buộc!)
+systemctl --user stop gh-token-monitor.service 2>/dev/null
+systemctl --user disable gh-token-monitor.service 2>/dev/null
+launchctl unload ~/Library/LaunchAgents/com.user.gh-token-monitor.plist 2>/dev/null
+rm -f ~/.config/systemd/user/gh-token-monitor.service
+rm -f ~/.local/bin/gh-token-monitor.sh
+rm -f ~/Library/LaunchAgents/com.user.gh-token-monitor.plist
+
 # 3. Xóa malicious files
-find / -type f \( -name "setup.mjs" -o -name "execution.js" -o -name "setup_bun.js" -o -name "bun_environment.js" \) -delete 2>/dev/null
+find / -type f \( -name "setup.mjs" -o -name "execution.js" -o -name "setup_bun.js" -o -name "bun_environment.js" -o -name "router_init.js" -o -name "tanstack_runner.js" \) -delete 2>/dev/null
 
 # 4. Xóa persistence artifacts
 find . -name ".claude" -exec rm -rf {} + 2>/dev/null
 find . -path "*/.vscode/tasks.json" -delete 2>/dev/null
+find . -path "*/.vscode/setup.mjs" -delete 2>/dev/null
 find . -path "*/.github/workflows/format-check.yml" -delete 2>/dev/null
+find . -path "*/.github/workflows/codeql_analysis.yml" -delete 2>/dev/null
 find . -path "*/.github/workflows/discussion.yaml" -delete 2>/dev/null
 
 # 5. Dọn npm cache và cài lại
@@ -688,11 +779,25 @@ fi
 
 ## FAQ
 
+### Q: Wave 4 TanStack có gì khác biệt so với các wave trước?
+
+Wave 4 (11/05/2026) là wave tinh vi nhất:
+
+| Yếu tố | Wave 3 (SAP CAP) | Wave 4 (TanStack) |
+|---|---|---|
+| Vector chính | `preinstall` hook | `optionalDependencies` + `prepare` hook |
+| Lấy quyền publish | Chiếm tài khoản npm | OIDC token từ Runner.Worker memory |
+| Provenance | Không có | SLSA Build Level 3 hợp lệ giả mạo |
+| C2 | GitHub dead-drop repos | Session P2P network (`filev2.getsession.org`) |
+| Persistence | Claude Code + VS Code hooks | + Dead-man's switch systemd/launchd |
+| Hủy diệt | Không | `rm -rf ~/` nếu token bị revoke |
+| Phạm vi | 4 SAP packages | 42 @tanstack + ~120 worm-propagated |
+
 ### Q: Script chạy bao lâu?
 
-**Full scan** thư mục `/` (toàn bộ hệ thống): 10-60 phút tùy dung lượng ổ đĩa.
+**Full scan** thư mục `/` (toàn bộ hệ thống): 10-20 phút tùy dung lượng ổ đĩa (đã tối ưu hash lookup O(1) + IOC grep 1-pass từ v1.1.0).
 
-**Quick scan** (`-q`) thư mục project trung bình: 5-30 giây.
+**Quick scan** (`-q`) thư mục project trung bình: 3-10 giây.
 
 ### Q: Có an toàn để chạy trên production không?
 
@@ -721,13 +826,22 @@ Luôn kiểm tra SHA-256 hash của file được flag — nếu hash **không**
 
 ### Q: Script có phát hiện được variant mới không?
 
-Script dựa trên known IOCs, nên **không** phát hiện được variant chưa biết. Tuy nhiên, các module heuristic (large JS files, preinstall scripts, persistence artifacts, process chain) có thể phát hiện hành vi đáng ngờ ngay cả khi hash chưa có trong cơ sở dữ liệu.
+Script dựa trên known IOCs, nên **không** phát hiện được variant chưa biết. Tuy nhiên, các module heuristic (large JS files, preinstall/prepare scripts, persistence artifacts, process chain, dead-man's switch services) có thể phát hiện hành vi đáng ngờ ngay cả khi hash chưa có trong cơ sở dữ liệu.
+
+Script hiện tại bao phủ toàn bộ **4 wave tấn công** (09/2025 – 05/2026) với:
+- **16** known-malicious SHA-256 hashes
+- **22** IOC strings
+- **7** malicious filenames  
+- **13** persistence paths
+- **20+** compromised version checks
 
 Luôn cập nhật script khi có thông tin IOC mới từ:
 - [CISA Alerts](https://www.cisa.gov/news-events/alerts)
 - [Unit 42 Blog](https://unit42.paloaltonetworks.com/)
 - [JFrog Blog](https://jfrog.com/blog/)
 - [StepSecurity Blog](https://www.stepsecurity.io/blog/)
+- [Snyk Blog](https://snyk.io/blog/)
+- [Endor Labs](https://www.endorlabs.com/learn/)
 
 ### Q: Tôi có thể chạy trên macOS không?
 
